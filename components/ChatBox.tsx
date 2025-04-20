@@ -30,6 +30,7 @@ export default function ChatBox() {
   const sendMessage = () => {
     if (message.trim() && socketRef.current) {
       const msg = { text: message, sender: 'You', status: 'sent' };
+      console.log('Sending message:', msg);
       socketRef.current.emit('sendMessage', msg);  // Emit message to server
       setMessage('');
       setTyping(false);
