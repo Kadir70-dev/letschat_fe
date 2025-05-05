@@ -2,15 +2,24 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import Peer from 'simple-peer';
+
 
 export default function ChatBox() {
   const [message, setMessage] = useState<string>('');
   const [chat, setChat] = useState<any[]>([]);
   const [typing, setTyping] = useState<boolean>(false);
+  const [isVideoChatActive, setIsVideoChatActive] = useState<boolean>(false);
   const socketRef = useRef<Socket | null>(null);
+  // Video Chat Refs
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const peerRef = useRef<any>(null);
+  const [videoStarted, setVideoStarted] = useState(false);
 
   useEffect(() => {
-    socketRef.current = io('http://localhost:5000');
+    const host = window.location.hostname;
+    socketRef.current = io(`http://${host}:5000`);
 
     // Listen for incoming messages
     socketRef.current.on('receiveMessage', (msg: any) => {
@@ -22,6 +31,15 @@ export default function ChatBox() {
       setTyping(user === 'Friend');
     });
 
+    // WebRTC: Incoming signal
+    socketRef.current.on('videoSignal', (data) => {
+      if (!peerRef.current) {
+        startPeer(false, data.signal);
+      } else {
+        peerRef.current.signal(data.signal);
+      }
+    });
+
     return () => {
       socketRef.current?.disconnect();
     };
@@ -30,17 +48,51 @@ export default function ChatBox() {
   const sendMessage = () => {
     if (message.trim() && socketRef.current) {
       const msg = { text: message, sender: 'You', status: 'sent' };
-      console.log('Sending message:', msg);
-      socketRef.current.emit('sendMessage', msg);  // Emit message to server
+      socketRef.current.emit('sendMessage', msg);
       setMessage('');
       setTyping(false);
     }
   };
 
   const handleTyping = () => {
-    if (socketRef.current) {
-      socketRef.current.emit('typing', 'You');
+    socketRef.current?.emit('typing', 'You');
+  };
+
+  // 🎥 Start Video Chat
+  const startVideoChat = async () => {
+    setVideoStarted(true);
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play();
     }
+
+    startPeer(true, null, stream);
+  };
+
+  const startPeer = (initiator: boolean, incomingSignal: any = null, stream: MediaStream | null = null) => {
+    const peer = new Peer({
+      initiator,
+      trickle: false,
+      stream,
+    });
+
+    peer.on('signal', (signal: any) => {
+      socketRef.current?.emit('videoSignal', { signal });
+    });
+
+    peer.on('stream', (remoteStream: MediaStream) => {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
+        remoteVideoRef.current.play();
+      }
+    });
+
+    if (incomingSignal) {
+      peer.signal(incomingSignal);
+    }
+
+    peerRef.current = peer;
   };
 
   return (
@@ -61,7 +113,7 @@ export default function ChatBox() {
         {typing && <div className="text-gray-500 text-sm">Friend is typing...</div>}
       </div>
 
-      <div className="flex">
+      <div className="flex mb-4">
         <input
           type="text"
           className="border p-2 flex-grow mr-2 rounded"
@@ -79,6 +131,19 @@ export default function ChatBox() {
         >
           Send
         </button>
+      </div>
+
+      <button
+        onClick={startVideoChat}
+        className="bg-green-600 text-white w-full py-2 rounded mb-2"
+        disabled={videoStarted}
+      >
+        {videoStarted ? 'Video Started' : 'Start Video Chat'}
+      </button>
+
+      <div className="flex gap-4 justify-center">
+        <video ref={localVideoRef} className="w-1/2 border rounded" muted playsInline></video>
+        <video ref={remoteVideoRef} className="w-1/2 border rounded" playsInline></video>
       </div>
     </div>
   );
